@@ -1,0 +1,600 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  This CF template deploys the REA Sinatra App in the ap-southeast-2 (Sydney) region. 
+  The template creates a multi-AZ, load balanced and auto-scaled web site running on apache
+  web servers using Ubuntu 14.04 LTS as base OS image. The ALB is deployed in public subnets while the web servers reside in private subnets.
+  The web servers are configured to span all availability zones in the Sydney region and are auto-scaled based on the number of the healthy web servers.
+  The instances are load balanced with a simple health check against the default web page. Thus, providing a fault tolerant solution.
+  The output of this template is the ALB's DNS name which can be used to access the website over http.
+Resources:
+  #VPC creation with public and private subnets in each of the 3 AZs.
+  SinatraVPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: sinatrainfra-vpc
+  SinatraPublicSubnet1:    
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs
+          Ref: AWS::Region  
+      CidrBlock: 10.0.0.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: sinatrainfra-public-subnet-1
+        - Key: subnet-type
+          Value: public
+      VpcId: !Ref SinatraVPC
+  SinatraPrivateSubnet1:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: sinatrainfra-private-subnet-1
+        - Key: subnet-type
+          Value: private
+      VpcId: !Ref SinatraVPC
+      AvailabilityZone: !GetAtt 
+        - SinatraPublicSubnet1
+        - AvailabilityZone
+  SinatraPublicSubnet2:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: !Select
+        - 1
+        - !GetAZs
+          Ref: AWS::Region
+      CidrBlock: 10.0.2.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: sinatrainfra-public-subnet-2
+        - Key: subnet-type
+          Value: public
+      VpcId: !Ref SinatraVPC
+  SinatraPrivateSubnet2:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      CidrBlock: 10.0.3.0/24
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: sinatrainfra-private-subnet-2
+        - Key: subnet-type
+          Value: private
+      VpcId: !Ref SinatraVPC
+      AvailabilityZone: !GetAtt 
+        - SinatraPublicSubnet2
+        - AvailabilityZone
+  SinatraPublicSubnet3:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: !Select
+        - 2
+        - !GetAZs
+          Ref: AWS::Region
+      CidrBlock: 10.0.4.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: sinatrainfra-public-subnet-3
+        - Key: subnet-type
+          Value: public
+      VpcId: !Ref SinatraVPC
+  SinatraPrivateSubnet3:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      CidrBlock: 10.0.5.0/24
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: sinatrainfra-private-subnet-3
+        - Key: subnet-type
+          Value: private
+      VpcId: !Ref SinatraVPC
+      AvailabilityZone: !GetAtt 
+        - SinatraPublicSubnet3
+        - AvailabilityZone
+  #IGW creation
+  SinatraInfraIGW:
+    Type: 'AWS::EC2::InternetGateway'
+    Properties:
+      Tags:
+        - Key: Name
+          Value: sinatrainfra-internet-gateway
+  #IGW attachment
+  SinatraInfraIGWAttachment:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      InternetGatewayId: !Ref SinatraInfraIGW
+      VpcId: !Ref SinatraVPC
+  #NATGW1 creation and EIP1 association
+  SintraInfraNATGW1:
+    DependsOn: SinatraInfraIGWAttachment
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId:
+        Fn::GetAtt:
+        - SinatraInfraEIP1
+        - AllocationId
+      SubnetId: !Ref SinatraPublicSubnet1
+      Tags: 
+      - Key: Name
+        Value: sinatrainfra-NATGW1
+      - Key: NATGW-AZ
+        Value: sinatrainfra-2a
+  SinatraInfraEIP1:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+  #NATGW2 creation and EIP2 association
+  SintraInfraNATGW2:
+    DependsOn: SinatraInfraIGWAttachment
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId:
+        Fn::GetAtt:
+        - SinatraInfraEIP2
+        - AllocationId
+      SubnetId: !Ref SinatraPublicSubnet2
+      Tags: 
+      - Key: Name
+        Value: sinatrainfra-NATGW2
+      - Key: NATGW-AZ
+        Value: sinatrainfra-2b
+  SinatraInfraEIP2:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+  #NATGW3 creation and EIP3 association
+  SintraInfraNATGW3:
+    DependsOn: SinatraInfraIGWAttachment
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId:
+        Fn::GetAtt:
+        - SinatraInfraEIP3
+        - AllocationId
+      SubnetId: !Ref SinatraPublicSubnet3
+      Tags: 
+      - Key: Name
+        Value: sinatrainfra-NATGW3
+      - Key: NATGW-AZ
+        Value: sinatrainfra-2c
+  SinatraInfraEIP3:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc      
+  #Setting up networking resources for the public and private subnets.
+  SinatraInfraPublicRouteTable:
+    DependsOn: SinatraInfraIGWAttachment
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref SinatraVPC
+      Tags:
+        - Key: Name
+          Value: sinatrainfra-public-routetable
+        - Key: routetable-type
+          Value: public
+  SinatraInfraPublicDefaultRoute:
+    DependsOn: SinatraInfraIGWAttachment
+    Type: 'AWS::EC2::Route'
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref SinatraInfraIGW
+      RouteTableId: !Ref SinatraInfraPublicRouteTable
+  SinatraInfraPrivateRouteTable1:
+    DependsOn: SinatraInfraIGWAttachment
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref SinatraVPC
+      Tags:
+        - Key: Name
+          Value: sinatrainfra-private-routetable1
+        - Key: routetable-type
+          Value: private
+  SinatraInfraPrivateRouteTable2:
+    DependsOn: SinatraInfraIGWAttachment
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref SinatraVPC
+      Tags:
+        - Key: Name
+          Value: sinatrainfra-private-routetable-2
+        - Key: routetable-type
+          Value: private
+  SinatraInfraPrivateRouteTable3:
+    DependsOn: SinatraInfraIGWAttachment
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref SinatraVPC
+      Tags:
+        - Key: Name
+          Value: sinatrainfra-private-routetable-3
+        - Key: routetable-type
+          Value: private      
+  SinatraInfraPrivatetRoute1:
+    DependsOn: SinatraInfraIGWAttachment
+    DependsOn: SintraInfraNATGW1
+    Type: 'AWS::EC2::Route'
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref SintraInfraNATGW1
+      RouteTableId: !Ref SinatraInfraPrivateRouteTable1
+  SinatraInfraPrivatetRoute2:
+    DependsOn: SinatraInfraIGWAttachment
+    DependsOn: SintraInfraNATGW2
+    Type: 'AWS::EC2::Route'
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref SintraInfraNATGW2
+      RouteTableId: !Ref SinatraInfraPrivateRouteTable2
+  SinatraInfraPrivatetRoute3:
+    DependsOn: SinatraInfraIGWAttachment
+    DependsOn: SintraInfraNATGW3
+    Type: 'AWS::EC2::Route'
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref SintraInfraNATGW3
+      RouteTableId: !Ref SinatraInfraPrivateRouteTable3
+  SinatraInfraPublicSubnetAssoc1:
+    DependsOn: SinatraInfraIGWAttachment
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref SinatraPublicSubnet1
+      RouteTableId: !Ref SinatraInfraPublicRouteTable
+  SinatraInfraPublicSubnetAssoc2:
+    DependsOn: SinatraInfraIGWAttachment
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref SinatraPublicSubnet2
+      RouteTableId: !Ref SinatraInfraPublicRouteTable
+  SinatraInfraPublicSubnetAssoc3:
+    DependsOn: SinatraInfraIGWAttachment
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref SinatraPublicSubnet3
+      RouteTableId: !Ref SinatraInfraPublicRouteTable   
+  SinatraInfraPrivateSubnetAssoc1:
+    DependsOn: 
+      - SinatraInfraIGWAttachment
+      - SinatraInfraPrivatetRoute1
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref SinatraPrivateSubnet1
+      RouteTableId: !Ref SinatraInfraPrivateRouteTable1
+  SinatraInfraPrivateSubnetAssoc2:
+    DependsOn: 
+      - SinatraInfraIGWAttachment
+      - SinatraInfraPrivatetRoute2
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref SinatraPrivateSubnet2
+      RouteTableId: !Ref SinatraInfraPrivateRouteTable2
+  SinatraInfraPrivateSubnetAssoc3:
+    DependsOn: 
+      - SinatraInfraIGWAttachment
+      - SinatraInfraPrivatetRoute3
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref SinatraPrivateSubnet3
+      RouteTableId: !Ref SinatraInfraPrivateRouteTable3
+  SinatraInfraPublicNacl:
+    Type: AWS::EC2::NetworkAcl
+    Properties:
+      VpcId: !Ref SinatraVPC
+      Tags:
+        - Key: Name
+          Value: sinatrainfra-public-nacl
+  SinatraInfraPrivateNacl:
+    Type: AWS::EC2::NetworkAcl
+    Properties:
+      VpcId: !Ref SinatraVPC
+      Tags:
+        - Key: Name
+          Value: sinatrainfra-private-nacl    
+  SinatraInfraPublicNaclIngressEntry1:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref SinatraInfraPublicNacl
+      RuleNumber: '100'
+      Protocol: "6"
+      RuleAction: allow
+      Egress: 'false'
+      CidrBlock: 0.0.0.0/0
+      PortRange:
+        From: '80'
+        To: '80'
+  SinatraInfraPublicNaclIngressEntry2:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref SinatraInfraPublicNacl
+      RuleNumber: '200'
+      Protocol: "6"
+      RuleAction: allow
+      Egress: 'false'
+      CidrBlock: 0.0.0.0/0
+      PortRange:
+        From: '0'
+        To: '65535'
+  SinatraInfraPublicNaclEgressEntry:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref SinatraInfraPublicNacl
+      RuleNumber: '100'
+      Protocol: "-1"
+      RuleAction: allow
+      Egress: 'true'
+      CidrBlock: 0.0.0.0/0
+      PortRange:
+        From: '0'
+        To: '65535'
+  SinatraInfraPrivateNaclIngressEntry1:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref SinatraInfraPrivateNacl
+      RuleNumber: '100'
+      Protocol: "6"
+      RuleAction: allow
+      Egress: 'false'
+      CidrBlock: 10.0.0.0/16
+      PortRange:
+        From: '80'
+        To: '80'
+  SinatraInfraPrivateNaclIngressEntry2:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref SinatraInfraPrivateNacl
+      RuleNumber: '200'
+      Protocol: "6"
+      RuleAction: allow
+      Egress: 'false'
+      CidrBlock: 0.0.0.0/0
+      PortRange:
+        From: '1024'
+        To: '65535'
+  SinatraInfraPrivateNaclEgressEntry:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref SinatraInfraPrivateNacl
+      RuleNumber: '100'
+      Protocol: "-1"
+      RuleAction: allow
+      Egress: 'true'
+      CidrBlock: 0.0.0.0/0
+      PortRange:
+        From: '0'
+        To: '65535'
+  SinatraInfraPublicNaclSubnetAssociation1:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    DependsOn:
+    - SinatraPublicSubnet1
+    - SinatraInfraPublicNacl
+    Properties:
+      SubnetId: !Ref SinatraPublicSubnet1
+      NetworkAclId: !Ref SinatraInfraPublicNacl
+  SinatraInfraPublicNaclSubnetAssociation2:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    DependsOn:
+    - SinatraPublicSubnet2
+    - SinatraInfraPublicNacl
+    Properties:
+      SubnetId: !Ref SinatraPublicSubnet2
+      NetworkAclId: !Ref SinatraInfraPublicNacl
+  SinatraInfraPublicNaclSubnetAssociation3:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    DependsOn:
+    - SinatraPublicSubnet3
+    - SinatraInfraPublicNacl
+    Properties:
+      SubnetId: !Ref SinatraPublicSubnet3
+      NetworkAclId: !Ref SinatraInfraPublicNacl
+  SinatraInfraPrivateNaclSubnetAssociation1:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    DependsOn: 
+      - SinatraPrivateSubnet1
+      - SinatraInfraPrivateNacl
+      - SinatraInfraPrivatetRoute1
+    Properties:
+      SubnetId: !Ref SinatraPrivateSubnet1
+      NetworkAclId: !Ref SinatraInfraPrivateNacl
+  SinatraInfraPrivateNaclSubnetAssociation2:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    DependsOn:
+      - SinatraPrivateSubnet2
+      - SinatraInfraPrivateNacl
+      - SinatraInfraPrivatetRoute2
+    Properties:
+      SubnetId: !Ref SinatraPrivateSubnet2
+      NetworkAclId: !Ref SinatraInfraPrivateNacl
+  SinatraInfraPrivateNaclSubnetAssociation3:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    DependsOn:
+      - SinatraPrivateSubnet3
+      - SinatraInfraPrivateNacl
+      - SinatraInfraPrivatetRoute3
+    Properties:
+      SubnetId: !Ref SinatraPrivateSubnet3
+      NetworkAclId: !Ref SinatraInfraPrivateNacl
+  #ASG creation in the private subnets with the desired capacity of 3 instances. The creation policy signals the exit status of the user data script with 0 = success and 1 = failure.
+  SinatraInfraWebServerGroup:
+    DependsOn:
+      - SinatraInfraPrivateSubnetAssoc1
+      - SinatraInfraPrivateSubnetAssoc2
+      - SinatraInfraPrivateSubnetAssoc3
+    Type: 'AWS::AutoScaling::AutoScalingGroup'
+    Properties:
+      VPCZoneIdentifier: 
+        - !Ref SinatraPrivateSubnet1
+        - !Ref SinatraPrivateSubnet2
+        - !Ref SinatraPrivateSubnet3
+      LaunchConfigurationName: !Ref SinatraInfraASGLaunchConfig
+      DesiredCapacity: '3'
+      MinSize: '1'
+      MaxSize: '3'
+      TargetGroupARNs:
+         - !Ref SinatraInfraALBTargetGroup
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT30M
+        Count: '3'
+    #Webservers only accepting HTTP traffic from the ALB
+  SinatraInfraInstanceSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Enables HTTP from the load balancer only
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          SourceSecurityGroupId: !Ref SinatraInfraALBSecurityGroup
+      VpcId: !Ref SinatraVPC
+      Tags:
+        - Key: Name
+          Value: SinatraInfraInstanceSecurityGroup - HTTP from ALB only          
+  # ASGLaunchConfig for the web servers, using t2.micro Ubuntu Server 14.04 LTS (HVM) as the base OS and installing and configuring the servers
+  SinatraInfraASGLaunchConfig:
+    Type: 'AWS::AutoScaling::LaunchConfiguration'
+    Properties:  
+      ImageId: ami-00cc4908ffe2edda3 
+      SecurityGroups:
+        - !Ref SinatraInfraInstanceSecurityGroup
+      InstanceType: t2.micro
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          apt-get update -y
+          apt-get upgrade -y
+          apt-get install -y curl gnupg build-essential python-setuptools
+          #Installing AWS helper scripts
+          mkdir aws-cfn-bootstrap-latest
+          curl https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz | tar xz -C aws-cfn-bootstrap-latest --strip-components 1
+          easy_install aws-cfn-bootstrap-latest 
+          gpg --keyserver hkp://pool.sks-keyservers.net --recv-keys 409B6B1796C275462A1703113804BB82D39DC0E3 7D2BAF1CF37B13E2069D6956105BD0E739499BDB
+          curl -sSL https://get.rvm.io | bash -s stable
+          usermod -a -G rvm `whoami`
+          if sudo grep -q secure_path /etc/sudoers; then sudo sh -c "echo export rvmsudo_secure_path=1 >> /etc/profile.d/rvm_secure_path.sh" && echo Environment variable installed; fi
+          source /etc/profile.d/rvm.sh
+          rvm reload
+          rvm install ruby-2.5 
+          rvm --default use ruby-2.5
+          gem install bundler --no-rdoc --no-ri
+          apt-get install -y dirmngr gnupg
+          apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 561F9B9CAC40B2F7
+          apt-get install -y apt-transport-https ca-certificates
+          sh -c 'echo deb https://oss-binaries.phusionpassenger.com/apt/passenger trusty main > /etc/apt/sources.list.d/passenger.list'
+          apt-get update -y
+          apt-get install apache2 -y
+          apt-get install -y libapache2-mod-passenger
+          a2enmod passenger 
+          apache2ctl restart
+          adduser --disabled-password --gecos "" sinatrauser
+          usermod -a -G rvm sinatrauser
+          mkdir -p /var/www/sinatra-app
+          chown sinatrauser: /var/www/sinatra-app
+          apt-get install -y git
+          cd /var/www/sinatra-app
+          sudo -u sinatrauser -H git clone  https://github.com/rea-cruitment/simple-sinatra-app.git
+          sudo -iu sinatrauser rvm use ruby-2.5
+          cd /var/www/sinatra-app/simple-sinatra-app/
+          bundle install
+          cd /etc/apache2/sites-enabled/
+          cat << EOF > /etc/apache2/sites-enabled/myapp.conf
+          Listen 80
+          <VirtualHost *:80>
+            ServerAlias *
+            # Tell Apache and Passenger where your app's directory is
+            DocumentRoot /var/www/sinatra-app/simple-sinatra-app
+    
+            # Relax Apache security settings
+            <Directory /var/www/sinatra-app/simple-sinatra-app>
+                Options -MultiViews
+                  AllowOverride all
+                Require all granted
+            </Directory>
+    
+            RailsBaseURI /
+            PassengerAppRoot /var/www/sinatra-app/simple-sinatra-app
+            SetEnv RAILS_ENV production
+    
+          </VirtualHost>
+          EOF
+          service apache2 reload
+          OUTPUT=$(curl -s http://localhost 2>&1)
+          if [[ $OUTPUT == "Hello World!" ]]
+          then
+          EXIT_STATUS=0
+          else
+          EXIT_STATUS=1
+          fi
+          /usr/local/bin/cfn-signal -e $EXIT_STATUS --stack ${AWS::StackName} --resource SinatraInfraWebServerGroup --region ${AWS::Region}
+  #Internet facing ALB creation in the public subnets
+  SinatraInfraAppLoadBalancer:
+    Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
+    Properties:
+      Subnets:
+        - !Ref SinatraPublicSubnet1
+        - !Ref SinatraPublicSubnet2
+        - !Ref SinatraPublicSubnet3
+      SecurityGroups:
+        - !Ref SinatraInfraALBSecurityGroup
+      Tags:
+        - Key: Name
+          Value: sinatrainfra-ALB
+  #ALB listening on port 80 only and forwarding traffic to web servers
+  SinatraInfraALBListener:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref SinatraInfraALBTargetGroup
+      LoadBalancerArn: !Ref SinatraInfraAppLoadBalancer
+      Port: '80'
+      Protocol: HTTP
+  #Simple webserver health check perfomed by ALB by pingin the default path    
+  SinatraInfraALBTargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 20
+      HealthyThresholdCount: 2
+      Port: 80
+      Protocol: HTTP
+      UnhealthyThresholdCount: 10
+      VpcId: !Ref SinatraVPC
+      Tags:
+        - Key: Name
+          Value: SinatraInfraALBTargetGroup
+  #ALB listening on port 80 from anywhere  
+  SinatraInfraALBSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Enables HTTP from the world
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          CidrIp: "0.0.0.0/0"
+      VpcId: !Ref SinatraVPC
+      Tags:
+        - Key: Name
+          Value: SinatraInfraALBSecurityGroup - HTTP from anywhere
+Outputs:
+  URL:
+    Description: The URL of the website
+    Value: !Join 
+      - ''
+      - - 'http://'
+        - !GetAtt 
+          - SinatraInfraAppLoadBalancer
+          - DNSName
